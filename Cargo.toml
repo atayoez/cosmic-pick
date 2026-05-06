@@ -1,0 +1,46 @@
+[package]
+name = "cosmic-clip"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Wayland-native StatusNotifierItem clipboard history manager with libcosmic settings GUI"
+repository = "https://github.com/atayozcan/cosmic-clip"
+
+[lib]
+name = "cosmic_clip"
+path = "src/lib.rs"
+
+[[bin]]
+name = "cosmic-clip"
+path = "src/main.rs"
+
+[[bin]]
+name = "cosmic-clip-settings"
+path = "src/bin/cosmic-clip-settings.rs"
+
+[dependencies]
+ksni = "0.3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync"] }
+arboard = { version = "3", default-features = false, features = ["wayland-data-control"] }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+dirs = "5"
+notify-rust = "4"
+serde_json = "1"
+
+[dependencies.libcosmic]
+git = "https://github.com/pop-os/libcosmic.git"
+rev = "0e0960f3c79138b445ae84f7ac6f91d4db36e8b4"
+default-features = false
+features = [
+    "advanced-shaping",
+    "tokio",
+    "wgpu",
+    "winit",
+]
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true

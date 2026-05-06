@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=cosmic-clip
+GenericName=Clipboard Manager
+Comment=Wayland-native clipboard history with tray icon
+Exec=@BIN@
+Icon=cosmic-clip-symbolic
+Terminal=false
+Categories=Utility;
+Keywords=clipboard;history;copy;paste;tray;
+StartupNotify=false
