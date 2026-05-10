@@ -1,10 +1,18 @@
 #!/usr/bin/env bash
-# cosmic-clip installer — places binaries, icons, and desktop entries under
-# $XDG_DATA_HOME (or ~/.local/share). Per-user, no root required.
+# cosmic-pick installer — places the panel-applet binary and the
+# settings binary under `$XDG_BIN_HOME` (or ~/.local/bin). Per-user,
+# no root required.
+#
+# cosmic-pick is a cosmic-panel applet, NOT a daemon. The panel
+# spawns the binary as needed; this installer only deposits files.
+#
+# Cleans up artifacts from previous installs (cosmic-clip SNI tray,
+# cosmic-clip-applet prototype, cosmic-emoji standalone, the old
+# .desktop launcher, autostart entries) so the upgrade is hands-off.
 #
 # Usage:
-#   ./install.sh             # builds release + installs both binaries
-#   ./install.sh --uninstall # removes everything this script wrote
+#   ./install.sh             # build + install
+#   ./install.sh --uninstall # remove everything this script wrote
 
 set -euo pipefail
 
@@ -17,16 +25,60 @@ ICON_DIR="$DATA_DIR/icons/hicolor/scalable/apps"
 APPS_DIR="$DATA_DIR/applications"
 AUTOSTART_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/autostart"
 
-uninstall() {
-    echo "cosmic-clip: uninstalling..."
-    rm -f "$BIN_DIR/cosmic-clip" "$BIN_DIR/cosmic-clip-settings"
-    rm -f "$ICON_DIR/cosmic-clip-symbolic.svg"
-    rm -f "$APPS_DIR/cosmic-clip.desktop" "$APPS_DIR/cosmic-clip-settings.desktop"
-    rm -f "$AUTOSTART_DIR/cosmic-clip.desktop"
-    if command -v gtk-update-icon-cache >/dev/null 2>&1; then
-        gtk-update-icon-cache -f -t "$DATA_DIR/icons/hicolor" 2>/dev/null || true
+# Files this installer (current or previous-name versions) has
+# written. Used by both install cleanup and --uninstall.
+OWNED_FILES=(
+    # current cosmic-pick
+    "$BIN_DIR/cosmic-pick"
+    "$BIN_DIR/cosmic-pick-settings"
+    "$APPS_DIR/io.github.atayozcan.CosmicPick.desktop"
+    # pre-rename cosmic-clip SNI + applet prototype + cosmic-emoji
+    "$BIN_DIR/cosmic-clip"
+    "$BIN_DIR/cosmic-clip-applet"
+    "$BIN_DIR/cosmic-emoji"
+    "$ICON_DIR/cosmic-clip-symbolic.svg"
+    "$APPS_DIR/cosmic-clip.desktop"
+    "$APPS_DIR/cosmic-clip-settings.desktop"
+    "$APPS_DIR/cosmic-emoji.desktop"
+    "$APPS_DIR/io.github.atayozcan.CosmicClipApplet.desktop"
+    "$AUTOSTART_DIR/cosmic-clip.desktop"
+)
+
+clean_old_artifacts() {
+    local removed=0
+    for f in "${OWNED_FILES[@]}"; do
+        if [[ -e "$f" ]]; then
+            rm -f "$f" && removed=$((removed + 1))
+        fi
+    done
+    if (( removed > 0 )); then
+        echo "cosmic-pick: cleaned up $removed stale file(s)."
     fi
-    echo "cosmic-clip: uninstalled."
+}
+
+refresh_caches() {
+    if command -v update-desktop-database >/dev/null 2>&1; then
+        update-desktop-database "$APPS_DIR" 2>/dev/null || true
+    fi
+}
+
+# Stop any running pre-rename binaries so the panel can pick up the
+# new applet on its next scan.
+stop_old_processes() {
+    for name in cosmic-clip cosmic-clip-applet cosmic-emoji cosmic-pick; do
+        if pgrep -x "$name" >/dev/null 2>&1; then
+            pkill -x "$name" 2>/dev/null || true
+        fi
+    done
+    sleep 0.2
+}
+
+uninstall() {
+    echo "cosmic-pick: uninstalling..."
+    stop_old_processes
+    clean_old_artifacts
+    refresh_caches
+    echo "cosmic-pick: uninstalled. (Remove the applet from your panel via cosmic-settings.)"
 }
 
 if [[ "${1:-}" == "--uninstall" ]]; then
@@ -34,39 +86,41 @@ if [[ "${1:-}" == "--uninstall" ]]; then
     exit 0
 fi
 
-echo "cosmic-clip: building (cargo build --release)..."
+echo "cosmic-pick: building (cargo build --release)..."
 cargo build --release
 
-mkdir -p "$BIN_DIR" "$ICON_DIR" "$APPS_DIR"
+stop_old_processes
 
-install -m 0755 target/release/cosmic-clip "$BIN_DIR/cosmic-clip"
-install -m 0755 target/release/cosmic-clip-settings "$BIN_DIR/cosmic-clip-settings"
-install -m 0644 resources/icons/cosmic-clip-symbolic.svg "$ICON_DIR/cosmic-clip-symbolic.svg"
+echo "cosmic-pick: cleaning previous install..."
+clean_old_artifacts
 
-# Render desktop files with the actual binary path
-sed "s|@BIN@|$BIN_DIR/cosmic-clip|" resources/cosmic-clip.desktop \
-    > "$APPS_DIR/cosmic-clip.desktop"
-sed "s|@BIN@|$BIN_DIR/cosmic-clip-settings|" resources/cosmic-clip-settings.desktop \
-    > "$APPS_DIR/cosmic-clip-settings.desktop"
+mkdir -p "$BIN_DIR" "$APPS_DIR"
 
-if command -v gtk-update-icon-cache >/dev/null 2>&1; then
-    gtk-update-icon-cache -f -t "$DATA_DIR/icons/hicolor" 2>/dev/null || true
-fi
+install -m 0755 target/release/cosmic-pick "$BIN_DIR/cosmic-pick"
+install -m 0755 target/release/cosmic-pick-settings "$BIN_DIR/cosmic-pick-settings"
 
-case ":$PATH:" in
-    *":$BIN_DIR:"*) ;;
-    *) echo "cosmic-clip: warning: $BIN_DIR is not in PATH; add it to your shell rc." ;;
-esac
+# cosmic-panel discovers applets by their APP_ID-named .desktop file
+# in $XDG_DATA_HOME/applications. The Name= is what shows up in the
+# panel's "Add Applet" picker.
+sed "s|@BIN@|$BIN_DIR/cosmic-pick|g" resources/cosmic-pick.desktop \
+    > "$APPS_DIR/io.github.atayozcan.CosmicPick.desktop"
+chmod 0644 "$APPS_DIR/io.github.atayozcan.CosmicPick.desktop"
+
+refresh_caches
 
 cat <<EOF
-cosmic-clip: installed.
+cosmic-pick: installed.
 
-  Daemon:   $BIN_DIR/cosmic-clip
-  Settings: $BIN_DIR/cosmic-clip-settings
-  Icon:     $ICON_DIR/cosmic-clip-symbolic.svg
-  Launchers: $APPS_DIR/cosmic-clip{,-settings}.desktop
+  Applet:   $BIN_DIR/cosmic-pick
+  Settings: $BIN_DIR/cosmic-pick-settings
+  Manifest: $APPS_DIR/io.github.atayozcan.CosmicPick.desktop
 
-Next steps:
-  - Run 'cosmic-clip' to start the tray daemon.
-  - Run 'cosmic-clip-settings' to tune history size, poll cadence, and autostart.
+To attach to the panel:
+  cosmic-settings → Panel → <Top|Bottom|Dock> → Add Applet → Pick
+
+The applet IS the long-running process — cosmic-panel spawns it
+when you add it to the panel and keeps it alive. There's no
+separate daemon, no autostart entry to manage.
+
+To uninstall: ./install.sh --uninstall
 EOF

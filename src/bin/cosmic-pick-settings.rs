@@ -1,18 +1,36 @@
-// libcosmic settings GUI for cosmic-clip. Edits are kept in memory until
-// Save; the Autostart toggle and Clear-history button apply immediately.
+// Standalone settings GUI for cosmic-pick. Launched as a child
+// process by the applet's "Settings…" button. The applet runs as a
+// cosmic::applet, this is a regular cosmic::app — they can't share
+// one binary's main loop, so they're split.
+//
+// Same cosmic_config-backed schema as the applet uses (`PickConfig`).
 
 use cosmic::app::{Core, Settings, Task};
 use cosmic::iced::{Alignment, Length, Size};
 use cosmic::prelude::*;
 use cosmic::widget::{self, space};
-use cosmic::Action;
 
-use cosmic_clip::autostart;
-use cosmic_clip::config::{self, Config};
-use cosmic_clip::history::History;
-use cosmic_clip::paths::{config_path, history_path, APP_ID};
+use cosmic_pick::config::{self, PickConfig};
+use cosmic_pick::emoji_recents::EmojiRecents;
+use cosmic_pick::history::History;
+use cosmic_pick::recent_colors::RecentColors;
+use cosmic_pick::{
+    color_recents_path, emoji_recents_path, fl, history_path, localize, APP_ID,
+};
+
+#[derive(Clone, Debug, Default)]
+#[allow(dead_code)] // Saving is matched in the view but only async saves
+                    // construct it; pick's saves are synchronous.
+enum SaveStatus {
+    #[default]
+    Idle,
+    Saving,
+    Saved,
+    Error(String),
+}
 
 fn main() -> cosmic::iced::Result {
+    localize::localize();
     let settings = Settings::default()
         .size(Size::new(640.0, 520.0))
         .exit_on_close(true);
@@ -25,19 +43,10 @@ pub enum Message {
     PollIntervalText(String),
     MaxCharsText(String),
     PersistHistory(bool),
-    Autostart(bool),
     ClearHistory,
+    ClearEmojiRecents,
+    ClearColorRecents,
     Save,
-    SaveResult(Result<(), String>),
-}
-
-#[derive(Clone, Debug, Default)]
-enum SaveStatus {
-    #[default]
-    Idle,
-    Saving,
-    Saved,
-    Error(String),
 }
 
 pub struct App {
@@ -46,13 +55,12 @@ pub struct App {
     poll_interval_text: String,
     max_chars_text: String,
     persist_history: bool,
-    autostart_enabled: bool,
     status: SaveStatus,
 }
 
 impl App {
-    fn build_config(&self) -> Config {
-        Config {
+    fn build_config(&self) -> PickConfig {
+        PickConfig {
             history_size: self.history_size_text.parse().unwrap_or(50).max(1),
             poll_interval_ms: self.poll_interval_text.parse().unwrap_or(500).max(100),
             persist_history: self.persist_history,
@@ -75,18 +83,19 @@ impl cosmic::Application for App {
     }
 
     fn init(core: Core, _: ()) -> (Self, Task<Message>) {
-        let cfg = config::read(&config_path()).unwrap_or_default();
-        let mut app = App {
+        let cfg = config::load();
+        let app = App {
             core,
             history_size_text: cfg.history_size.to_string(),
             poll_interval_text: cfg.poll_interval_ms.to_string(),
             max_chars_text: cfg.max_entry_chars.to_string(),
             persist_history: cfg.persist_history,
-            autostart_enabled: autostart::is_enabled(),
             status: SaveStatus::Idle,
         };
-        let title = app.set_window_title("cosmic-clip Settings".into());
-        (app, title)
+        // set_window_title's API now requires a window::Id we can't
+        // produce here without poking iced internals; the WM uses the
+        // .desktop's Name= for the window title anyway.
+        (app, Task::none())
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -107,96 +116,103 @@ impl cosmic::Application for App {
                 }
             }
             Message::PersistHistory(b) => self.persist_history = b,
-            Message::Autostart(on) => {
-                let res = if on {
-                    autostart::enable()
-                } else {
-                    autostart::disable()
-                };
-                if let Err(e) = res {
-                    self.status = SaveStatus::Error(format!("autostart: {e}"));
-                }
-                self.autostart_enabled = autostart::is_enabled();
-            }
             Message::ClearHistory => {
-                let path = history_path();
                 let empty = History::new();
-                let res = empty.save(&path);
-                self.status = match res {
+                self.status = match empty.save(&history_path()) {
                     Ok(()) => SaveStatus::Saved,
-                    Err(e) => SaveStatus::Error(format!("clear: {e}")),
+                    Err(e) => SaveStatus::Error(format!("clear-{e}")),
+                };
+            }
+            Message::ClearEmojiRecents => {
+                let empty = EmojiRecents::new();
+                self.status = match empty.save(&emoji_recents_path()) {
+                    Ok(()) => SaveStatus::Saved,
+                    Err(e) => SaveStatus::Error(format!("clear-{e}")),
+                };
+            }
+            Message::ClearColorRecents => {
+                let empty = RecentColors::new();
+                self.status = match empty.save(&color_recents_path()) {
+                    Ok(()) => SaveStatus::Saved,
+                    Err(e) => SaveStatus::Error(format!("clear-{e}")),
                 };
             }
             Message::Save => {
-                self.status = SaveStatus::Saving;
                 let cfg = self.build_config();
-                let path = config_path();
-                return Task::perform(
-                    async move { config::write(&path, &cfg).map_err(|e| e.to_string()) },
-                    |r| Action::App(Message::SaveResult(r)),
-                );
+                self.status = match config::save(&cfg) {
+                    Ok(()) => SaveStatus::Saved,
+                    Err(e) => SaveStatus::Error(e.to_string()),
+                };
             }
-            Message::SaveResult(Ok(())) => self.status = SaveStatus::Saved,
-            Message::SaveResult(Err(e)) => self.status = SaveStatus::Error(e),
         }
         Task::none()
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let general = widget::settings::section()
-            .title("History")
+        let history_section = widget::settings::section()
+            .title(fl!("settings-section-history"))
             .add(widget::settings::item(
-                "History size (entries)",
+                fl!("settings-history-size"),
                 widget::text_input("50", &self.history_size_text)
                     .on_input(Message::HistorySizeText)
                     .width(Length::Fixed(80.0)),
             ))
             .add(widget::settings::item(
-                "Poll interval (ms)",
+                fl!("settings-poll-interval"),
                 widget::text_input("500", &self.poll_interval_text)
                     .on_input(Message::PollIntervalText)
                     .width(Length::Fixed(80.0)),
             ))
             .add(widget::settings::item(
-                "Max characters per entry",
+                fl!("settings-max-chars"),
                 widget::text_input("10000", &self.max_chars_text)
                     .on_input(Message::MaxCharsText)
                     .width(Length::Fixed(120.0)),
             ))
             .add(widget::settings::item(
-                "Persist history across restarts",
+                fl!("settings-persist"),
                 widget::toggler(self.persist_history).on_toggle(Message::PersistHistory),
             ));
 
-        let startup = widget::settings::section()
-            .title("Startup")
+        let actions = widget::settings::section()
+            .title(fl!("settings-section-actions"))
             .add(widget::settings::item(
-                "Start cosmic-clip on login",
-                widget::toggler(self.autostart_enabled).on_toggle(Message::Autostart),
+                fl!("settings-clear-row"),
+                widget::button::destructive(fl!("settings-clear-button"))
+                    .on_press(Message::ClearHistory),
+            ))
+            .add(widget::settings::item(
+                fl!("settings-clear-emoji-row"),
+                widget::button::destructive(fl!("settings-clear-button"))
+                    .on_press(Message::ClearEmojiRecents),
+            ))
+            .add(widget::settings::item(
+                fl!("settings-clear-color-row"),
+                widget::button::destructive(fl!("settings-clear-button"))
+                    .on_press(Message::ClearColorRecents),
             ));
 
-        let actions = widget::settings::section().title("Actions").add(
-            widget::settings::item(
-                "Clear clipboard history",
-                widget::button::destructive("Clear now").on_press(Message::ClearHistory),
-            ),
-        );
-
-        let body =
-            widget::settings::view_column(vec![general.into(), startup.into(), actions.into()]);
+        let body = widget::settings::view_column(vec![history_section.into(), actions.into()]);
         let scroll = widget::scrollable(body).height(Length::Fill);
 
         let status_widget: Element<Message> = match &self.status {
             SaveStatus::Idle => widget::Space::new().into(),
-            SaveStatus::Saving => widget::text("Saving…").into(),
-            SaveStatus::Saved => widget::text("Saved.").into(),
-            SaveStatus::Error(e) => widget::text(format!("Error: {e}")).into(),
+            SaveStatus::Saving => widget::text(fl!("settings-saving")).into(),
+            SaveStatus::Saved => widget::text(fl!("settings-saved")).into(),
+            SaveStatus::Error(e) => {
+                let msg = if let Some(rest) = e.strip_prefix("clear-") {
+                    fl!("settings-error-clear", error = rest.to_string())
+                } else {
+                    fl!("settings-error", error = e.clone())
+                };
+                widget::text(msg).into()
+            }
         };
 
         let footer = widget::row::with_children(vec![
             status_widget,
             space::horizontal().into(),
-            widget::button::suggested("Save")
+            widget::button::suggested(fl!("settings-save"))
                 .on_press(Message::Save)
                 .into(),
         ])

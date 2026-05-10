@@ -1,32 +1,38 @@
 [package]
-name = "cosmic-clip"
+name = "cosmic-pick"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "Wayland-native StatusNotifierItem clipboard history manager with libcosmic settings GUI"
-repository = "https://github.com/atayozcan/cosmic-clip"
+description = "Wayland-native pick-anything popover for COSMIC: clipboard history, emoji, colors"
+repository = "https://github.com/atayozcan/cosmic-pick"
 
 [lib]
-name = "cosmic_clip"
+name = "cosmic_pick"
 path = "src/lib.rs"
 
 [[bin]]
-name = "cosmic-clip"
+name = "cosmic-pick"
 path = "src/main.rs"
 
+# Settings GUI is a second binary so the applet's `Settings…` button
+# can launch it as a child process — `cosmic::Application` works in
+# both the applet runtime and the standalone-window runtime, but they
+# can't share one binary's main loop.
 [[bin]]
-name = "cosmic-clip-settings"
-path = "src/bin/cosmic-clip-settings.rs"
+name = "cosmic-pick-settings"
+path = "src/bin/cosmic-pick-settings.rs"
 
 [dependencies]
-ksni = "0.3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync"] }
 arboard = { version = "3", default-features = false, features = ["wayland-data-control"] }
 serde = { version = "1", features = ["derive"] }
-toml = "0.8"
-dirs = "5"
-notify-rust = "4"
 serde_json = "1"
+emojis = "0.8"
+dirs = "6"
+i18n-embed = { version = "0.16", features = ["fluent-system", "desktop-requester"] }
+i18n-embed-fl = "0.10"
+rust-embed = "8"
+futures-util = "0.3"
 
 [dependencies.libcosmic]
 git = "https://github.com/pop-os/libcosmic.git"
@@ -34,13 +40,23 @@ rev = "0e0960f3c79138b445ae84f7ac6f91d4db36e8b4"
 default-features = false
 features = [
     "advanced-shaping",
+    "applet",
     "tokio",
     "wgpu",
     "winit",
 ]
+
+[dependencies.cosmic-config]
+git = "https://github.com/pop-os/libcosmic.git"
+rev = "0e0960f3c79138b445ae84f7ac6f91d4db36e8b4"
 
 [profile.release]
 opt-level = "z"
 lto = true
 codegen-units = 1
 strip = true
+
+# Workaround for proc-macro-error2 v2.0.1's `pub use proc_macro;` which
+# trips Rust's E0365 future-incompat. Drop when upstream publishes a fix.
+[patch.crates-io]
+proc-macro-error2 = { git = "https://github.com/fgardt/proc-macro-error-2", rev = "53ff94b61c678593158db1a3d50269c6f0de0db7" }

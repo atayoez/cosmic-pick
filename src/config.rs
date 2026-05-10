@@ -1,59 +1,68 @@
+//! Persistent settings, stored via `cosmic_config`.
+//!
+//! Lives at `~/.config/cosmic/io.github.atayozcan.CosmicPick/v1/<field>`,
+//! one RON-encoded file per field. cosmic_config is the COSMIC-native
+//! config story (used by all upstream applets), gives us cross-process
+//! live reload via inotify for free, and lets a future
+//! `cosmic-settings` integration discover the schema without changes
+//! here.
+
+use cosmic_config::{Config, CosmicConfigEntry};
+// Derive macro lives in the sibling `cosmic-config-derive` crate.
+// Macros and traits inhabit different namespaces, so this second
+// `use` doesn't shadow the trait import.
+use cosmic_config::cosmic_config_derive::CosmicConfigEntry;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
 
-pub fn default_history_size() -> usize {
-    50
-}
-pub fn default_poll_ms() -> u64 {
-    500
-}
-pub fn default_persist() -> bool {
-    true
-}
-pub fn default_max_entry_chars() -> usize {
-    10_000
-}
+use crate::APP_ID;
 
-#[derive(Deserialize, Serialize, Clone, Debug)]
-pub struct Config {
-    #[serde(default = "default_history_size")]
-    pub history_size: usize,
-    #[serde(default = "default_poll_ms")]
+pub const CONFIG_VERSION: u64 = 1;
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, CosmicConfigEntry)]
+#[version = 1]
+pub struct PickConfig {
+    /// Max number of distinct clipboard entries to keep.
+    pub history_size: u32,
+    /// Clipboard poll interval. Lower = snappier, higher = less CPU.
     pub poll_interval_ms: u64,
-    #[serde(default = "default_persist")]
+    /// Persist clipboard history across applet restarts.
     pub persist_history: bool,
-    #[serde(default = "default_max_entry_chars")]
-    pub max_entry_chars: usize,
+    /// Reject clipboard entries longer than this; avoids logging
+    /// huge pastes.
+    pub max_entry_chars: u32,
 }
 
-impl Default for Config {
+impl Default for PickConfig {
     fn default() -> Self {
         Self {
-            history_size: default_history_size(),
-            poll_interval_ms: default_poll_ms(),
-            persist_history: default_persist(),
-            max_entry_chars: default_max_entry_chars(),
+            history_size: 50,
+            poll_interval_ms: 500,
+            persist_history: true,
+            max_entry_chars: 10_000,
         }
     }
 }
 
-pub fn read(path: &Path) -> Result<Config, String> {
-    if !path.exists() {
-        return Ok(Config::default());
-    }
-    let s = std::fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
-    toml::from_str(&s).map_err(|e| format!("parse {}: {e}", path.display()))
+pub fn handler() -> Result<Config, cosmic_config::Error> {
+    Config::new(APP_ID, CONFIG_VERSION)
 }
 
-pub fn write(path: &Path, cfg: &Config) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+pub fn load() -> PickConfig {
+    let Ok(h) = handler() else {
+        return PickConfig::default();
+    };
+    match PickConfig::get_entry(&h) {
+        Ok(cfg) => cfg,
+        Err((errs, cfg)) => {
+            for e in errs {
+                eprintln!("cosmic-pick: config: {e}");
+            }
+            cfg
+        }
     }
-    let mut out = String::new();
-    out.push_str("# cosmic-clip config\n\n");
-    out.push_str(&format!("history_size      = {}\n", cfg.history_size));
-    out.push_str(&format!("poll_interval_ms  = {}\n", cfg.poll_interval_ms));
-    out.push_str(&format!("persist_history   = {}\n", cfg.persist_history));
-    out.push_str(&format!("max_entry_chars   = {}\n", cfg.max_entry_chars));
-    std::fs::write(path, out)
+}
+
+pub fn save(cfg: &PickConfig) -> Result<(), cosmic_config::Error> {
+    let h = handler()?;
+    cfg.write_entry(&h)
 }
