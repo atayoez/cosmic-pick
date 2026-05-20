@@ -40,7 +40,6 @@ fn main() -> cosmic::iced::Result {
 #[derive(Clone, Debug)]
 pub enum Message {
     HistorySizeText(String),
-    PollIntervalText(String),
     MaxCharsText(String),
     PersistHistory(bool),
     ClearHistory,
@@ -52,7 +51,6 @@ pub enum Message {
 pub struct App {
     core: Core,
     history_size_text: String,
-    poll_interval_text: String,
     max_chars_text: String,
     persist_history: bool,
     status: SaveStatus,
@@ -62,7 +60,6 @@ impl App {
     fn build_config(&self) -> PickConfig {
         PickConfig {
             history_size: self.history_size_text.parse().unwrap_or(50).max(1),
-            poll_interval_ms: self.poll_interval_text.parse().unwrap_or(500).max(100),
             persist_history: self.persist_history,
             max_entry_chars: self.max_chars_text.parse().unwrap_or(10_000).max(1),
         }
@@ -87,7 +84,6 @@ impl cosmic::Application for App {
         let app = App {
             core,
             history_size_text: cfg.history_size.to_string(),
-            poll_interval_text: cfg.poll_interval_ms.to_string(),
             max_chars_text: cfg.max_entry_chars.to_string(),
             persist_history: cfg.persist_history,
             status: SaveStatus::Idle,
@@ -103,11 +99,6 @@ impl cosmic::Application for App {
             Message::HistorySizeText(s) => {
                 if s.chars().all(|c| c.is_ascii_digit()) && s.len() <= 5 {
                     self.history_size_text = s;
-                }
-            }
-            Message::PollIntervalText(s) => {
-                if s.chars().all(|c| c.is_ascii_digit()) && s.len() <= 6 {
-                    self.poll_interval_text = s;
                 }
             }
             Message::MaxCharsText(s) => {
@@ -155,12 +146,6 @@ impl cosmic::Application for App {
                 fl!("settings-history-size"),
                 widget::text_input("50", &self.history_size_text)
                     .on_input(Message::HistorySizeText)
-                    .width(Length::Fixed(80.0)),
-            ))
-            .add(widget::settings::item(
-                fl!("settings-poll-interval"),
-                widget::text_input("500", &self.poll_interval_text)
-                    .on_input(Message::PollIntervalText)
                     .width(Length::Fixed(80.0)),
             ))
             .add(widget::settings::item(

@@ -23,8 +23,6 @@ pub const CONFIG_VERSION: u64 = 1;
 pub struct PickConfig {
     /// Max number of distinct clipboard entries to keep.
     pub history_size: u32,
-    /// Clipboard poll interval. Lower = snappier, higher = less CPU.
-    pub poll_interval_ms: u64,
     /// Persist clipboard history across applet restarts.
     pub persist_history: bool,
     /// Reject clipboard entries longer than this; avoids logging
@@ -36,7 +34,6 @@ impl Default for PickConfig {
     fn default() -> Self {
         Self {
             history_size: 50,
-            poll_interval_ms: 500,
             persist_history: true,
             max_entry_chars: 10_000,
         }

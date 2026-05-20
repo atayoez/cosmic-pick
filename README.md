@@ -20,7 +20,11 @@ helper crate for paths, autostart, and the single-binary
 - Polls the clipboard every N ms (default 500) and stores the last N
   distinct text entries (default 50)
 - Tray icon → menu of recent entries; click one to copy it back
-- "Clear History" wipes both memory and the on-disk cache
+- ☆ next to each entry pins it: pinned entries float to the top,
+  survive **Clear History**, and aren't evicted by the size cap
+- "Clear History" wipes unpinned entries from memory and the on-disk
+  cache *and* empties the live regular + primary clipboards; pinned
+  history entries stay
 - "Settings…" opens the libcosmic GUI (in a child process)
 - History persists at `~/.local/share/cosmic-clip/history.json`
   (toggleable in settings)
@@ -74,6 +78,18 @@ pkexec pacman -S --needed rust pkgconf libxkbcommon wayland mesa \
     vulkan-icd-loader fontconfig freetype2
 ```
 
+### Runtime deps
+
+`wl-clipboard` (provides `wl-copy`). The applet shells out to it for
+every clipboard write — the in-process iced/smithay-clipboard path
+silently no-ops from a background watcher because it requires
+Wayland keyboard focus, which a panel applet doesn't have when its
+popup is closed.
+
+```sh
+pkexec pacman -S --needed wl-clipboard
+```
+
 ## Run
 
 ```sh
@@ -96,12 +112,14 @@ cosmic-clip --popup
 
 A common chord is **Super+V**. Esc closes the popup without copying.
 
-### Both clipboards in sync
+### Primary locked to Ctrl+C
 
-Whatever you copy via Ctrl+C lands in the primary selection too, and
-text you highlight (primary selection) lands in the regular
-clipboard — they're mirrored on every poll. The history records
-either flavor of "new content" once.
+Primary is held in lockstep with the regular clipboard. On every
+poll tick, if the primary selection has drifted (e.g. you
+highlighted text in a terminal), it gets re-snapped to whatever
+you last Ctrl+C'd — middle-click paste always matches your last
+explicit copy. Selecting text never enters history and never sticks
+in primary past one tick.
 
 ## Config
 
