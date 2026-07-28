@@ -80,14 +80,27 @@ pkexec pacman -S --needed rust pkgconf libxkbcommon wayland mesa \
 
 ### Runtime deps
 
-`wl-clipboard` (provides `wl-copy`). The applet shells out to it for
-every clipboard write — the in-process iced/smithay-clipboard path
-silently no-ops from a background watcher because it requires
-Wayland keyboard focus, which a panel applet doesn't have when its
-popup is closed.
+`wl-clipboard` (provides `wl-copy` and `wl-paste`). The applet shells
+out to `wl-paste --watch` to observe clipboard changes and to
+`wl-copy` for every clipboard write — the in-process
+iced/smithay-clipboard path silently no-ops from a background watcher
+because it requires Wayland keyboard focus, which a panel applet
+doesn't have when its popup is closed. Without it installed, the
+clipboard watcher subscription has nothing to run and the Clipboard
+tab stays empty.
 
 ```sh
+# Arch
 pkexec pacman -S --needed wl-clipboard
+
+# openSUSE
+sudo zypper install wl-clipboard
+
+# Fedora
+sudo dnf install wl-clipboard
+
+# Debian / Ubuntu
+sudo apt install wl-clipboard
 ```
 
 ## Run
